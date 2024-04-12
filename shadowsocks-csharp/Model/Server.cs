@@ -116,6 +116,7 @@ namespace Shadowsocks.Model
         public string group;
         public bool enable;
         public bool udp_over_tcp;
+        public float speed;
 
         private object protocoldata;
         private object obfsdata;

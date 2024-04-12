@@ -15,6 +15,7 @@ using ZXing.Common;
 using ZXing.QrCode;
 using System.Threading;
 using System.Text.RegularExpressions;
+using System.Linq;
 
 namespace Shadowsocks.View
 {
@@ -57,6 +58,7 @@ namespace Shadowsocks.View
         private LogForm logForm;
         private string _urlToOpen;
         private System.Timers.Timer timerDelayCheckUpdate;
+        private MenuItem SortServersItem;
 
         public MenuViewController(ShadowsocksController controller)
         {
@@ -262,6 +264,8 @@ namespace Shadowsocks.View
                 CreateMenuItem("Port settings...", new EventHandler(this.ShowPortMapItem_Click)),
                 UpdateItem = CreateMenuItem("Update available", new EventHandler(this.UpdateItem_Clicked)),
                 new MenuItem("-"),
+                this.SortServersItem = CreateMenuItem("Speed Test", new EventHandler(this.SpeedTestServers_Click)),
+                new MenuItem("-"),
                 CreateMenuItem("Scan QRCode from screen...", new EventHandler(this.ScanQRCodeItem_Click)),
                 CreateMenuItem("Import SSR links from clipboard...", new EventHandler(this.CopyAddress_Click)),
                 new MenuItem("-"),
@@ -280,6 +284,48 @@ namespace Shadowsocks.View
                 CreateMenuItem("Quit", new EventHandler(this.Quit_Click))
             });
             this.UpdateItem.Visible = false;
+        }
+
+        private void SpeedTestServers_Click(object sender, EventArgs e)
+        {
+            Configuration configurationCopy = this.controller.GetCurrentConfiguration();
+            System.Threading.Tasks.Task<Server>[] array = configurationCopy.configs.ConvertAll<System.Threading.Tasks.Task<Server>>((Server server) =>
+            {
+                System.Threading.Tasks.Task<Server> task = new System.Threading.Tasks.Task<Server>(() =>
+                {
+                    server.speed = Util.ProxySpeedTest.DoTest(server);
+                    Logging.Info(string.Format("Speed test : {0}, cost:{1}", server.FriendlyName(), server.speed));
+                    return server;
+                });
+                task.Start();
+                return task;
+            }).ToArray();
+
+            System.Threading.Tasks.Task.Factory.ContinueWhenAll<Server>(array, (System.Threading.Tasks.Task<Server>[] serverArr) =>
+            {
+                int num = serverArr.Count<System.Threading.Tasks.Task<Server>>();
+                IList<Server> servers = configurationCopy.configs;
+                IEnumerable<Server> validServers = servers.Where<Server>((Server x) => x.speed < 5f);
+                configurationCopy.configs = validServers.OrderBy<Server, float>((Server x) => x.speed).ToList<Server>();
+
+                string[] str = new string[] { "Speed test finished, total:", num.ToString(), ", valid server:", configurationCopy.configs.Count.ToString(), ", the server will be sorted..." };
+                Logging.Info(string.Concat(str));
+                if (configurationCopy.configs.Any())
+                {
+                    ////MessageBox.Show($"The fastest is {configurationCopy.configs.FirstOrDefault()?.ToString()}");
+                    ShowBalloonTip(I18N.GetString("Success"),
+                        I18N.GetString($"The fastest is {configurationCopy.configs.FirstOrDefault()?.ToString()}"), ToolTipIcon.Info, 10000);
+                }
+                else
+                {
+                    ////MessageBox.Show($"Valid server: 0");
+                    ShowBalloonTip(I18N.GetString("Error"), I18N.GetString($"Valid server: 0"), ToolTipIcon.Info, 10000);
+                }
+
+                controller.SaveServersConfig(configurationCopy);
+                ////this.controller.SaveServers(configurationCopy.configs, configurationCopy.localPort, configurationCopy.portableMode);
+                ////this.controller.Start(true);
+            });
         }
 
         private void controller_ConfigChanged(object sender, EventArgs e)
@@ -367,11 +413,11 @@ namespace Shadowsocks.View
                     }
                 }
                 URL_Split(updateFreeNodeChecker.FreeNodeResult, ref urls);
-                for (int i = urls.Count - 1; i >= 0; --i)
-                {
-                    if (!urls[i].StartsWith("ssr"))
-                        urls.RemoveAt(i);
-                }
+                //for (int i = urls.Count - 1; i >= 0; --i)
+                //{
+                //    if (!urls[i].StartsWith("ssr"))
+                //        urls.RemoveAt(i);
+                //}
                 if (urls.Count > 0)
                 {
                     bool keep_selected_server = false; // set 'false' if import all nodes
